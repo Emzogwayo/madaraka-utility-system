@@ -92,7 +92,7 @@ export default function LandingPage() {
               in Madaraka Estate
             </h1>
             <p className="mt-6 max-w-xl text-lg text-slate-500">
-              Fast, transparent and accurate dispatch for water, electricity, and waste issues.
+              Fast, transparent and accurate dispatch for water, electricity and waste issues.
             </p>
             <p className="mt-3 max-w-xl text-base text-slate-500">
               A centralized platform connecting Madaraka residents with utility providers for faster service resolution.
