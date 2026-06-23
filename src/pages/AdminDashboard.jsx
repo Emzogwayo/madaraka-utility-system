@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { collection, query, onSnapshot, doc, setDoc } from "firebase/firestore";
+// Added 'updateDoc' to allow the Admin to change a user's status
+import { collection, query, onSnapshot, doc, setDoc, updateDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
 
-// SECONDARY APP IMPORTS (Crucial for creating dispatchers without logging the admin out)
+// SECONDARY APP IMPORTS
 import { initializeApp } from "firebase/app";
 import { getAuth, createUserWithEmailAndPassword, signOut as signOutSecondary } from "firebase/auth";
 
 import { 
   LogOut, ShieldAlert, Users, Activity, FileText, 
-  ShieldCheck, UserPlus, X
+  ShieldCheck, UserPlus, X, Droplet, Zap, Trash2, Ban, CheckCircle2
 } from "lucide-react";
 
 // Your web app's Firebase configuration
@@ -39,7 +40,7 @@ export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState("overview");
   const navigate = useNavigate();
 
-  // MODAL STATE FOR PROVISIONING
+  // MODAL STATE
   const [showModal, setShowModal] = useState(false);
   const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -52,7 +53,6 @@ export default function AdminDashboard() {
       if (currentUser) {
         setUser(currentUser);
         
-        // Fetch ALL tickets in the system (You and Eniola can filter this later)
         const qTickets = query(collection(db, "tickets"));
         const unsubTickets = onSnapshot(qTickets, (snapshot) => {
           const fetchedTickets = [];
@@ -60,7 +60,6 @@ export default function AdminDashboard() {
           setTickets(fetchedTickets);
         });
 
-        // Fetch ALL users in the system to replace the hardcoded data
         const qUsers = query(collection(db, "users"));
         const unsubUsers = onSnapshot(qUsers, (snapshot) => {
           const fetchedUsers = [];
@@ -88,10 +87,8 @@ export default function AdminDashboard() {
     setIsProvisioning(true);
 
     try {
-      // Create user on the secondary app
       const userCredential = await createUserWithEmailAndPassword(secondaryAuth, newEmail, newPassword);
       
-      // Save their details to your main Firestore 'users' collection
       await setDoc(doc(db, "users", userCredential.user.uid), {
         email: newEmail,
         role: "Dispatcher",
@@ -100,10 +97,8 @@ export default function AdminDashboard() {
         createdAt: new Date()
       });
 
-      // Sign them out of the secondary app to keep it clean
       await signOutSecondary(secondaryAuth);
       
-      // Close modal and reset form
       setShowModal(false);
       setNewEmail("");
       setNewPassword("");
@@ -117,11 +112,29 @@ export default function AdminDashboard() {
     }
   };
 
+  // 3. SUSPEND/REACTIVATE RESIDENT LOGIC
+  const toggleUserStatus = async (userId, currentStatus) => {
+    // We only suspend residents. Dispatchers are company reps.
+    const newStatus = currentStatus === "Suspended" ? "Active" : "Suspended";
+    try {
+      await updateDoc(doc(db, "users", userId), {
+        status: newStatus
+      });
+    } catch (error) {
+      console.error("Error updating user status:", error);
+      alert("Failed to update user status.");
+    }
+  };
+
   if (!user) return null;
 
-  // DYNAMIC COUNTERS (Calculating live data from Firestore)
+  // DYNAMIC COUNTERS & ANALYTICS
   const activeResidentsCount = platformUsers.filter(u => u.role === "Resident").length;
   const activeDispatchersCount = platformUsers.filter(u => u.role === "Dispatcher").length;
+  
+  const waterTickets = tickets.filter(t => t.category === "Water Services").length;
+  const electricityTickets = tickets.filter(t => t.category === "Electricity Services").length;
+  const wasteTickets = tickets.filter(t => t.category === "Waste Management").length;
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col md:flex-row font-sans text-slate-900 relative">
@@ -137,10 +150,12 @@ export default function AdminDashboard() {
             <form onSubmit={handleProvisionDispatcher} className="space-y-4">
               <div>
                 <label className="block text-sm font-bold mb-1">Email Address</label>
-                <input type="email" required value={newEmail} onChange={e => setNewEmail(e.target.value)} className="w-full p-3 border rounded-xl" placeholder="water.tech@madaraka.com" />
+                {/* type="email" automatically enforces the @something.com format */}
+                <input type="email" required value={newEmail} onChange={e => setNewEmail(e.target.value)} className="w-full p-3 border rounded-xl" placeholder="water.tech@nairobiwater.co.ke" />
               </div>
               <div>
                 <label className="block text-sm font-bold mb-1">Temporary Password</label>
+                {/* minLength="6" enforces the Firebase 6-character rule on the frontend */}
                 <input type="password" required minLength="6" value={newPassword} onChange={e => setNewPassword(e.target.value)} className="w-full p-3 border rounded-xl" placeholder="••••••••" />
               </div>
               <div>
@@ -173,6 +188,9 @@ export default function AdminDashboard() {
           <button onClick={() => setActiveTab("users")} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${activeTab === "users" ? "bg-slate-800 text-white" : "text-slate-400 hover:bg-slate-800 hover:text-white"}`}>
             <Users className="h-5 w-5" /> User Management
           </button>
+          <button onClick={() => setActiveTab("audit")} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${activeTab === "audit" ? "bg-slate-800 text-white" : "text-slate-400 hover:bg-slate-800 hover:text-white"}`}>
+            <FileText className="h-5 w-5" /> Audit Logs
+          </button>
         </nav>
 
         <div className="p-4 border-t border-slate-800">
@@ -196,18 +214,35 @@ export default function AdminDashboard() {
               </div>
               <div className="bg-white p-6 rounded-2xl border shadow-sm">
                 <span className="text-sm font-medium text-slate-500">Active Residents</span>
-                {/* Dynamically connected to Firestore! */}
                 <span className="block text-4xl font-extrabold text-emerald-600">{activeResidentsCount}</span>
               </div>
               <div className="bg-white p-6 rounded-2xl border shadow-sm">
                 <span className="text-sm font-medium text-slate-500">Active Dispatchers</span>
-                {/* Dynamically connected to Firestore! */}
                 <span className="block text-4xl font-extrabold text-amber-600">{activeDispatchersCount}</span>
+              </div>
+            </div>
+
+            {/* NEW: QUICK ANALYTICS BREAKDOWN */}
+            <div>
+              <h3 className="text-lg font-bold mb-4">Ticket Breakdown by Utility</h3>
+              <div className="grid sm:grid-cols-3 gap-4">
+                <div className="bg-sky-50 p-4 rounded-xl border border-sky-100 flex items-center justify-between">
+                  <div className="flex items-center gap-3"><Droplet className="text-sky-500"/> <span className="font-semibold text-sky-900">Water</span></div>
+                  <span className="text-2xl font-bold text-sky-700">{waterTickets}</span>
+                </div>
+                <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 flex items-center justify-between">
+                  <div className="flex items-center gap-3"><Zap className="text-amber-500"/> <span className="font-semibold text-amber-900">Electricity</span></div>
+                  <span className="text-2xl font-bold text-amber-700">{electricityTickets}</span>
+                </div>
+                <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100 flex items-center justify-between">
+                  <div className="flex items-center gap-3"><Trash2 className="text-emerald-500"/> <span className="font-semibold text-emerald-900">Waste</span></div>
+                  <span className="text-2xl font-bold text-emerald-700">{wasteTickets}</span>
+                </div>
               </div>
             </div>
             
             <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
-              <FileText className="h-12 w-12 text-slate-300 mb-4" />
+              <ShieldAlert className="h-12 w-12 text-slate-300 mb-4" />
               <h3 className="text-lg font-bold">Ticket Moderation</h3>
               <p className="text-slate-500 max-w-md mt-2">Escalated and disputed tickets will populate here for administrative review once the manual escalation module is active.</p>
             </div>
@@ -227,15 +262,14 @@ export default function AdminDashboard() {
               <thead className="bg-slate-50 border-b">
                 <tr>
                   <th className="p-4">Email</th>
-                  <th className="p-4">Role</th>
-                  <th className="p-4">Department</th>
+                  <th className="p-4">Role / Dept</th>
                   <th className="p-4">Status</th>
+                  <th className="p-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {platformUsers.length === 0 && <tr><td colSpan="4" className="p-8 text-center text-slate-500">No users found.</td></tr>}
                 
-                {/* Live mapping of ALL users from the database */}
                 {platformUsers.map((u) => (
                   <tr key={u.id} className="hover:bg-slate-50">
                     <td className="p-4 font-medium">{u.email}</td>
@@ -247,11 +281,55 @@ export default function AdminDashboard() {
                       }`}>
                         {u.role || "Resident"}
                       </span>
+                      {u.department && <span className="block text-xs text-slate-500 mt-1">{u.department}</span>}
                     </td>
-                    <td className="p-4 text-slate-500">{u.department || "N/A"}</td>
-                    <td className="p-4 text-emerald-600 font-medium">{u.status || "Active"}</td>
+                    <td className="p-4">
+                      <span className={`font-semibold flex items-center gap-1 ${u.status === "Suspended" ? "text-red-500" : "text-emerald-600"}`}>
+                        {u.status || "Active"}
+                      </span>
+                    </td>
+                    <td className="p-4 text-right">
+                      {/* Only allow suspending Residents, not Dispatchers or Admins */}
+                      {u.role === "Resident" && (
+                        <button 
+                          onClick={() => toggleUserStatus(u.id, u.status || "Active")}
+                          className={`flex items-center justify-end gap-1 ml-auto text-xs font-bold ${u.status === "Suspended" ? "text-emerald-600 hover:text-emerald-700" : "text-red-500 hover:text-red-700"}`}
+                        >
+                          {u.status === "Suspended" ? <><CheckCircle2 className="h-4 w-4"/> Reactivate</> : <><Ban className="h-4 w-4"/> Suspend</>}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* TAB 3: AUDIT LOGS (SCAFFOLDED FOR ENIOLA) */}
+        {activeTab === "audit" && (
+          <div className="bg-white border rounded-2xl shadow-sm overflow-hidden">
+            <div className="p-6 border-b">
+              <h3 className="text-lg font-bold">System Audit Logs</h3>
+              <p className="text-sm text-slate-500">Track dispatcher status changes and administrative actions.</p>
+            </div>
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 border-b">
+                <tr>
+                  <th className="p-4">Date & Time</th>
+                  <th className="p-4">User (Email)</th>
+                  <th className="p-4">Action Performed</th>
+                  <th className="p-4">Target Ticket ID</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {/* Eniola will replace this single row with her fetched data map next week */}
+                <tr>
+                  <td colSpan="4" className="p-12 text-center text-slate-500">
+                    <ShieldAlert className="h-8 w-8 mx-auto text-slate-300 mb-3" />
+                    Audit logs will be populated here during Phase 4.
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
