@@ -4,6 +4,7 @@ import LoginPage from "./pages/LoginPage";
 import ResidentDashboard from "./pages/ResidentDashboard";
 import DispatcherDashboard from "./pages/DispatcherDashboard";
 import ReportForm from "./pages/ReportForm";
+import AdminDashboard from "./pages/AdminDashboard";
 
 function App() {
   return (
@@ -19,6 +20,8 @@ function App() {
         <Route path="/report" element={<ReportForm />} />
         {/* Protected Route (Dispatcher) */}
         <Route path="/dispatcher-dashboard" element={<DispatcherDashboard />} />
+        {/* Protected Route (Admin) */}
+        <Route path="/admin-dashboard" element={<AdminDashboard />} />
       </Routes>
     </Router>
   );

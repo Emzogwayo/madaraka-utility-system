@@ -53,12 +53,19 @@ export default function LoginPage() {
         // 2. Once verified, look up this specific user in our Firestore 'users' collection using their unique ID (uid).
         const userDoc = await getDoc(doc(db, "users", userCredential.user.uid));
         
-        // 3. ROLE-BASED ROUTING: Check the database document to see what their role is.
-        if (userDoc.exists() && userDoc.data().role === "Dispatcher") {
-          // If they are a dispatcher, send them to the admin backend
-          navigate("/dispatcher-dashboard");
+        // 3. 3-WAY ROLE-BASED ROUTING: Check the database document to see what their role is.
+        if (userDoc.exists()) {
+          const role = userDoc.data().role;
+          
+          if (role === "Dispatcher") {
+            navigate("/dispatcher-dashboard");
+          } else if (role === "Administrator") {
+            navigate("/admin-dashboard");
+          } else {
+            navigate("/dashboard"); // Resident
+          }
         } else {
-          // If they are a resident (or if no role is found), send them to the resident portal
+          // Fallback just in case a resident doesn't have a role document
           navigate("/dashboard");
         }
 
