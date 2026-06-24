@@ -84,6 +84,13 @@ export default function AdminDashboard() {
   // 2. DISPATCHER PROVISIONING LOGIC
   const handleProvisionDispatcher = async (e) => {
     e.preventDefault();
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newEmail)) {
+      alert("Validation Error: Please enter a valid email address (e.g., tech@kplc.co.ke)");
+      return; // Stops the function from running!
+    }
+
     setIsProvisioning(true);
 
     try {
