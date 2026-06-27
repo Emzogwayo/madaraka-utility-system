@@ -3,7 +3,6 @@ import { useNavigate, Link } from "react-router-dom";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { collection, query, where, onSnapshot, doc, updateDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
-// --- NEW: Added XCircle icon for the "No" button ---
 import { 
   LogOut, PlusCircle, LayoutDashboard, FileText, Settings, 
   Droplet, Zap, Trash2, AlertCircle, Loader2, User, Phone, CheckCircle, XCircle
@@ -71,11 +70,9 @@ export default function ResidentDashboard() {
     }
   };
 
-  // --- NEW: Function to handle a rejected resolution ---
   const handleRejectResolution = async (ticketId) => {
     try {
       const ticketRef = doc(db, "tickets", ticketId);
-      // If the resident says no, kick the ticket back to Pending so the dispatcher has to handle it again
       await updateDoc(ticketRef, { status: "Pending" });
     } catch (error) {
       console.error("Error rejecting resolution: ", error);
@@ -83,11 +80,30 @@ export default function ResidentDashboard() {
     }
   };
 
+  // --- NEW: Function to Soft-Delete (Cancel) a report ---
+  const handleCancelReport = async (ticketId) => {
+    // Add a browser confirmation popup so they don't accidentally click it
+    const isConfirmed = window.confirm("Are you sure you want to cancel this report? It will remain in your records as cancelled.");
+    
+    if (isConfirmed) {
+      try {
+        const ticketRef = doc(db, "tickets", ticketId);
+        // We update the status instead of deleting the document
+        await updateDoc(ticketRef, { status: "Cancelled" });
+      } catch (error) {
+        console.error("Error cancelling report: ", error);
+        alert("Failed to cancel the report.");
+      }
+    }
+  };
+
+  // --- UPDATED: Added "Cancelled" style to the badge generator ---
   const getStatusBadge = (status) => {
     if (status === "Pending") return "bg-yellow-100 text-yellow-700";
     if (status === "Dispatched") return "bg-blue-100 text-blue-700";
     if (status === "Resolved") return "bg-emerald-100 text-emerald-700";
     if (status === "Closed") return "bg-slate-200 text-slate-700";
+    if (status === "Cancelled") return "bg-red-50 text-red-500 border border-red-100"; 
     return "bg-slate-100 text-slate-700";
   };
 
@@ -209,7 +225,6 @@ export default function ResidentDashboard() {
                           </div>
                         )}
 
-                        {/* --- NEW UI: YES/NO DECISION BUTTONS --- */}
                         {report.status === "Resolved" && (
                           <div className="mt-4 flex flex-col sm:flex-row gap-3 w-full max-w-md">
                             <button
@@ -231,6 +246,17 @@ export default function ResidentDashboard() {
                           <p className="mt-4 text-xs font-bold text-slate-400 flex items-center gap-1">
                             <CheckCircle className="w-3 h-3" /> You confirmed this issue was resolved.
                           </p>
+                        )}
+
+                        {/* --- NEW UI: The "Cancel Report" Button --- */}
+                        {/* Only shows if the ticket hasn't been processed yet */}
+                        {report.status === "Pending" && (
+                          <button
+                            onClick={() => handleCancelReport(report.id)}
+                            className="mt-4 text-xs font-semibold text-red-500 hover:text-red-700 flex items-center gap-1 transition-colors"
+                          >
+                            <Trash2 className="w-3 h-3" /> Cancel this report
+                          </button>
                         )}
 
                         <div className="flex items-center gap-2 mt-4 sm:hidden">
@@ -255,7 +281,6 @@ export default function ResidentDashboard() {
               })
             )}
           </div>
-          
           
         </div>
 

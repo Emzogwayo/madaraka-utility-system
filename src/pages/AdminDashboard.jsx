@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-// Added 'updateDoc' to allow the Admin to change a user's status
-import { collection, query, onSnapshot, doc, setDoc, updateDoc } from "firebase/firestore";
+// --- UPDATED: Added orderBy to sort logs by time ---
+import { collection, query, orderBy, onSnapshot, doc, setDoc, updateDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
 
 // SECONDARY APP IMPORTS
@@ -14,8 +14,6 @@ import {
   ShieldCheck, UserPlus, X, Droplet, Zap, Trash2, Ban, CheckCircle2
 } from "lucide-react";
 
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
   apiKey: "AIzaSyCReY3q16xv34cC7db4QDzaKx4Ez0PZvG0",
   authDomain: "madaraka-utility-system.firebaseapp.com",
@@ -26,7 +24,6 @@ const firebaseConfig = {
   measurementId: "G-S1JX78Z1BS"
 };
 
-// Initialize the secondary app for provisioning
 const secondaryApp = initializeApp(firebaseConfig, "SecondaryApp");
 const secondaryAuth = getAuth(secondaryApp);
 
@@ -36,6 +33,8 @@ export default function AdminDashboard() {
   // LIVE DATABASE STATE
   const [tickets, setTickets] = useState([]);
   const [platformUsers, setPlatformUsers] = useState([]);
+  // --- NEW: State to hold the audit logs ---
+  const [auditLogs, setAuditLogs] = useState([]);
   
   const [activeTab, setActiveTab] = useState("overview");
   const navigate = useNavigate();
@@ -53,6 +52,7 @@ export default function AdminDashboard() {
       if (currentUser) {
         setUser(currentUser);
         
+        // Fetch Tickets
         const qTickets = query(collection(db, "tickets"));
         const unsubTickets = onSnapshot(qTickets, (snapshot) => {
           const fetchedTickets = [];
@@ -60,6 +60,7 @@ export default function AdminDashboard() {
           setTickets(fetchedTickets);
         });
 
+        // Fetch Users
         const qUsers = query(collection(db, "users"));
         const unsubUsers = onSnapshot(qUsers, (snapshot) => {
           const fetchedUsers = [];
@@ -67,7 +68,16 @@ export default function AdminDashboard() {
           setPlatformUsers(fetchedUsers);
         });
 
-        return () => { unsubTickets(); unsubUsers(); };
+        // --- NEW: Fetch Audit Logs (Ordered newest to oldest) ---
+        const qLogs = query(collection(db, "audit_logs"), orderBy("timestamp", "desc"));
+        const unsubLogs = onSnapshot(qLogs, (snapshot) => {
+          const fetchedLogs = [];
+          snapshot.forEach((doc) => fetchedLogs.push({ id: doc.id, ...doc.data() }));
+          setAuditLogs(fetchedLogs);
+        });
+
+        // Clean up all three listeners
+        return () => { unsubTickets(); unsubUsers(); unsubLogs(); };
       } else {
         navigate("/login");
       }
@@ -88,7 +98,7 @@ export default function AdminDashboard() {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(newEmail)) {
       alert("Validation Error: Please enter a valid email address (e.g., tech@kplc.co.ke)");
-      return; // Stops the function from running!
+      return; 
     }
 
     setIsProvisioning(true);
@@ -121,7 +131,6 @@ export default function AdminDashboard() {
 
   // 3. SUSPEND/REACTIVATE RESIDENT LOGIC
   const toggleUserStatus = async (userId, currentStatus) => {
-    // We only suspend residents. Dispatchers are company reps.
     const newStatus = currentStatus === "Suspended" ? "Active" : "Suspended";
     try {
       await updateDoc(doc(db, "users", userId), {
@@ -157,12 +166,10 @@ export default function AdminDashboard() {
             <form onSubmit={handleProvisionDispatcher} className="space-y-4">
               <div>
                 <label className="block text-sm font-bold mb-1">Email Address</label>
-                {/* type="email" automatically enforces the @something.com format */}
                 <input type="email" required value={newEmail} onChange={e => setNewEmail(e.target.value)} className="w-full p-3 border rounded-xl" placeholder="water.tech@nairobiwater.co.ke" />
               </div>
               <div>
                 <label className="block text-sm font-bold mb-1">Temporary Password</label>
-                {/* minLength="6" enforces the Firebase 6-character rule on the frontend */}
                 <input type="password" required minLength="6" value={newPassword} onChange={e => setNewPassword(e.target.value)} className="w-full p-3 border rounded-xl" placeholder="••••••••" />
               </div>
               <div>
@@ -229,7 +236,6 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* NEW: QUICK ANALYTICS BREAKDOWN */}
             <div>
               <h3 className="text-lg font-bold mb-4">Ticket Breakdown by Utility</h3>
               <div className="grid sm:grid-cols-3 gap-4">
@@ -296,7 +302,6 @@ export default function AdminDashboard() {
                       </span>
                     </td>
                     <td className="p-4 text-right">
-                      {/* Only allow suspending Residents, not Dispatchers or Admins */}
                       {u.role === "Resident" && (
                         <button 
                           onClick={() => toggleUserStatus(u.id, u.status || "Active")}
@@ -313,7 +318,7 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* TAB 3: AUDIT LOGS (SCAFFOLDED FOR ENIOLA) */}
+        {/* --- REPLACED: TAB 3 AUDIT LOGS --- */}
         {activeTab === "audit" && (
           <div className="bg-white border rounded-2xl shadow-sm overflow-hidden">
             <div className="p-6 border-b">
@@ -329,14 +334,33 @@ export default function AdminDashboard() {
                   <th className="p-4">Target Ticket ID</th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
-                {/* Eniola will replace this single row with her fetched data map next week */}
-                <tr>
-                  <td colSpan="4" className="p-12 text-center text-slate-500">
-                    <ShieldAlert className="h-8 w-8 mx-auto text-slate-300 mb-3" />
-                    Audit logs will be populated here during Phase 4.
-                  </td>
-                </tr>
+              <tbody className="divide-y divide-slate-100">
+                {auditLogs.length === 0 ? (
+                  <tr>
+                    <td colSpan="4" className="p-12 text-center text-slate-500">
+                      <ShieldAlert className="h-8 w-8 mx-auto text-slate-300 mb-3" />
+                      No audit logs found yet.
+                    </td>
+                  </tr>
+                ) : (
+                  auditLogs.map((log) => (
+                    <tr key={log.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="p-4 text-slate-500">
+                        {log.timestamp ? log.timestamp.toDate().toLocaleString() : 'Just now'}
+                      </td>
+                      <td className="p-4 font-bold text-slate-900">{log.performedBy}</td>
+                      <td className="p-4">
+                        <span className="px-2.5 py-1 bg-slate-100 border border-slate-200 text-slate-700 rounded-md text-xs font-bold uppercase tracking-wider">
+                          {log.action}
+                        </span>
+                        <span className="block text-sm text-slate-600 mt-2">{log.details}</span>
+                      </td>
+                      <td className="p-4 font-mono text-xs text-slate-400">
+                        {log.ticketId.slice(0, 8)}...
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

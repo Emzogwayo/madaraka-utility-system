@@ -2,13 +2,16 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { auth, db } from "../firebase";
 import { signOut } from "firebase/auth";
-import { collection, query, orderBy, onSnapshot, doc, updateDoc } from "firebase/firestore";
-import { Clock, CheckCircle, Truck, Loader2, LayoutDashboard, FileText, LogOut, User, Phone } from "lucide-react";
+// --- NEW IMPORTS: Added addDoc and serverTimestamp to create background logs ---
+import { collection, query, orderBy, onSnapshot, doc, updateDoc, addDoc, serverTimestamp } from "firebase/firestore";
+import { Clock, CheckCircle, Truck, Loader2, LayoutDashboard, FileText, LogOut, User, Phone, MapPin } from "lucide-react";
 
 export default function DispatcherDashboard() {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+
+  const [activeTab, setActiveTab] = useState("active"); 
 
   const [assigningId, setAssigningId] = useState(null);
   const [techName, setTechName] = useState("");
@@ -36,6 +39,16 @@ export default function DispatcherDashboard() {
     try {
       const ticketRef = doc(db, "tickets", ticketId);
       await updateDoc(ticketRef, { status: newStatus });
+
+      // --- NEW: Record a receipt in the audit_logs collection ---
+      await addDoc(collection(db, "audit_logs"), {
+        ticketId: ticketId,
+        action: "Status Update",
+        details: `Changed status to ${newStatus}`,
+        performedBy: auth.currentUser?.email || "Unknown Dispatcher",
+        timestamp: serverTimestamp()
+      });
+
     } catch (error) {
       console.error("Error updating status: ", error);
       alert("Failed to update ticket status.");
@@ -69,6 +82,15 @@ export default function DispatcherDashboard() {
         technicianContact: techContact.trim()
       });
       
+      // --- NEW: Record a receipt in the audit_logs collection ---
+      await addDoc(collection(db, "audit_logs"), {
+        ticketId: ticketId,
+        action: "Technician Assignment",
+        details: `Assigned technician ${techName.trim()} (${techContact.trim()})`,
+        performedBy: auth.currentUser?.email || "Unknown Dispatcher",
+        timestamp: serverTimestamp()
+      });
+      
       setAssigningId(null);
       setTechName("");
       setTechContact("");
@@ -87,13 +109,13 @@ export default function DispatcherDashboard() {
     }
   };
 
-  // --- UPDATED: Added "Closed" to the dispatcher's color scheme ---
   const getStatusColor = (status) => {
     switch(status) {
       case "Pending": return "bg-yellow-100 text-yellow-800 border-yellow-200";
       case "Dispatched": return "bg-blue-100 text-blue-800 border-blue-200";
       case "Resolved": return "bg-emerald-100 text-emerald-800 border-emerald-200";
       case "Closed": return "bg-slate-200 text-slate-600 border-slate-300"; 
+      case "Cancelled": return "bg-red-50 text-red-500 border-red-200"; 
       default: return "bg-slate-100 text-slate-800 border-slate-200";
     }
   };
@@ -101,6 +123,10 @@ export default function DispatcherDashboard() {
   const totalReports = tickets.length;
   const pendingReports = tickets.filter(t => t.status === "Pending").length;
   const dispatchedReports = tickets.filter(t => t.status === "Dispatched").length;
+
+  const displayedTickets = activeTab === "active" 
+    ? tickets.filter(t => t.status !== "Closed" && t.status !== "Cancelled") 
+    : tickets;
 
   return (
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
@@ -113,11 +139,22 @@ export default function DispatcherDashboard() {
               Madaraka <span className="text-blue-600">Connect</span>
             </h1>
           </div>
+          
           <nav className="px-4 space-y-2">
-            <button className="w-full flex items-center gap-3 px-4 py-3 bg-blue-50 text-blue-700 rounded-xl font-semibold transition-colors">
+            <button 
+              onClick={() => setActiveTab("active")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold transition-colors ${
+                activeTab === "active" ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+              }`}
+            >
               <LayoutDashboard className="w-5 h-5" /> Dispatch Center
             </button>
-            <button className="w-full flex items-center gap-3 px-4 py-3 text-slate-500 hover:bg-slate-50 hover:text-slate-900 rounded-xl font-medium transition-colors">
+            <button 
+              onClick={() => setActiveTab("all")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold transition-colors ${
+                activeTab === "all" ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+              }`}
+            >
               <FileText className="w-5 h-5" /> All Records
             </button>
           </nav>
@@ -160,7 +197,9 @@ export default function DispatcherDashboard() {
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="p-6 border-b border-slate-100">
-              <h3 className="text-lg font-bold text-slate-900">Active Issues</h3>
+              <h3 className="text-lg font-bold text-slate-900">
+                {activeTab === "active" ? "Active Issues" : "All Records"}
+              </h3>
             </div>
 
             <div className="p-6">
@@ -168,23 +207,37 @@ export default function DispatcherDashboard() {
                 <div className="flex justify-center items-center h-40">
                   <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
                 </div>
-              ) : tickets.length === 0 ? (
+              ) : displayedTickets.length === 0 ? (
                 <div className="text-center py-12">
                   <CheckCircle className="h-12 w-12 text-emerald-400 mx-auto mb-4" />
-                  <p className="text-slate-500">There are no active utility issues.</p>
+                  <p className="text-slate-500">
+                    {activeTab === "active" ? "There are no active utility issues." : "No records found in the database."}
+                  </p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {tickets.map((ticket) => {
+                  {displayedTickets.map((ticket) => {
                     
-                    // --- NEW: LOGIC TO DISABLE BUTTONS ---
-                    // Evaluates the current state of the ticket to lock out illogical actions
-                    const isPendingDisabled = ticket.status === "Dispatched" || ticket.status === "Resolved" || ticket.status === "Closed" || ticket.technicianName;
-                    const isAssignDisabled = ticket.status === "Resolved" || ticket.status === "Closed";
-                    const isResolveDisabled = ticket.status === "Resolved" || ticket.status === "Closed";
+                    const isPendingDisabled = 
+                      ticket.status === "Dispatched" || 
+                      ticket.status === "Resolved" || 
+                      ticket.status === "Closed" || 
+                      ticket.status === "Cancelled" || 
+                      ticket.technicianName;
+
+                    const isAssignDisabled = 
+                      ticket.status === "Resolved" || 
+                      ticket.status === "Closed" || 
+                      ticket.status === "Cancelled";
+
+                    const isResolveDisabled = 
+                      ticket.status === "Resolved" || 
+                      ticket.status === "Closed" || 
+                      ticket.status === "Cancelled" || 
+                      !ticket.technicianName;
 
                     return (
-                      <div key={ticket.id} className="bg-slate-50 rounded-xl border border-slate-200 flex flex-col overflow-hidden transition-all hover:border-blue-200 hover:shadow-md">
+                      <div key={ticket.id} className={`bg-slate-50 rounded-xl border flex flex-col overflow-hidden transition-all hover:shadow-md ${ticket.status === 'Cancelled' ? 'border-red-100 opacity-75' : 'border-slate-200 hover:border-blue-200'}`}>
                         
                         <div className="p-5 border-b border-slate-200 bg-white">
                           <div className="flex justify-between items-start mb-2">
@@ -198,6 +251,27 @@ export default function DispatcherDashboard() {
 
                         <div className="p-5 flex-grow">
                           <p className="text-sm text-slate-700">{ticket.description}</p>
+                          
+                          {(ticket.imageUrl || ticket.location) && (
+                            <div className="mt-4 flex flex-col gap-3">
+                              {ticket.imageUrl && (
+                                <div className="relative h-48 rounded-xl overflow-hidden border border-slate-200 bg-white">
+                                  <img src={ticket.imageUrl} alt="Fault Evidence" className="w-full h-full object-cover hover:scale-105 transition-transform duration-500" />
+                                </div>
+                              )}
+                              
+                              {ticket.location && (
+                                <a 
+                                  href={`https://www.google.com/maps/search/?api=1&query=${ticket.location.lat},${ticket.location.lng}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center justify-center gap-2 w-full py-3 bg-white hover:bg-blue-50 hover:text-blue-700 text-slate-700 rounded-lg text-xs font-bold transition-colors border border-slate-200 shadow-sm"
+                                >
+                                  <MapPin className="w-4 h-4" /> Open Exact Location in Google Maps
+                                </a>
+                              )}
+                            </div>
+                          )}
                           
                           {ticket.technicianName && (
                             <div className="mt-4 bg-blue-50 p-3 rounded-lg border border-blue-100 flex flex-col gap-1">
@@ -252,7 +326,6 @@ export default function DispatcherDashboard() {
                             </div>
                           ) : (
                             <div className="flex gap-2">
-                              {/* --- UPDATED BUTTONS: Applied disabled states and conditional grey-out styles --- */}
                               
                               <button 
                                 onClick={() => handleStatusChange(ticket.id, "Pending")}
@@ -273,7 +346,7 @@ export default function DispatcherDashboard() {
                                     ? "border-slate-200 text-slate-400 bg-slate-100/50 cursor-not-allowed" 
                                     : "border-blue-200 hover:bg-blue-50 text-blue-700"}`}
                               >
-                                <Truck className="h-3 w-3" /> 
+                                <Truck className="w-3 h-3" /> 
                                 {ticket.technicianName ? "Reassign Tech" : "Assign & Dispatch"}
                               </button>
                               
