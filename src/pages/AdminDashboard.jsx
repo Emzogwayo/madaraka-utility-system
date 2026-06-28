@@ -1,19 +1,28 @@
+// ==========================================
+// 1. IMPORTS: Core React and Routing tools
+// ==========================================
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+
+// FIREBASE CORE: Authentication and Database functions
 import { onAuthStateChanged, signOut } from "firebase/auth";
-// --- UPDATED: Added orderBy to sort logs by time ---
 import { collection, query, orderBy, onSnapshot, doc, setDoc, updateDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
 
-// SECONDARY APP IMPORTS
+// SECONDARY FIREBASE APP: We import initializeApp specifically to create a "shadow" connection
+// This allows the Admin to create new user accounts without Firebase automatically logging the Admin out.
 import { initializeApp } from "firebase/app";
 import { getAuth, createUserWithEmailAndPassword, signOut as signOutSecondary } from "firebase/auth";
 
+// UI ICONS: Importing scalable vector graphics from Lucide
 import { 
   LogOut, ShieldAlert, Users, Activity, FileText, 
   ShieldCheck, UserPlus, X, Droplet, Zap, Trash2, Ban, CheckCircle2
 } from "lucide-react";
 
+// ==========================================
+// 2. FIREBASE CONFIGURATION
+// ==========================================
 const firebaseConfig = {
   apiKey: "AIzaSyCReY3q16xv34cC7db4QDzaKx4Ez0PZvG0",
   authDomain: "madaraka-utility-system.firebaseapp.com",
@@ -28,14 +37,17 @@ const secondaryApp = initializeApp(firebaseConfig, "SecondaryApp");
 const secondaryAuth = getAuth(secondaryApp);
 
 export default function AdminDashboard() {
-  const [user, setUser] = useState(null);
+  // ==========================================
+  // 3. STATE MANAGEMENT (The Component's Memory)
+  // ==========================================
+  const [user, setUser] = useState(null); 
   
   // LIVE DATABASE STATE
   const [tickets, setTickets] = useState([]);
   const [platformUsers, setPlatformUsers] = useState([]);
-  // --- NEW: State to hold the audit logs ---
-  const [auditLogs, setAuditLogs] = useState([]);
+  const [auditLogs, setAuditLogs] = useState([]); // ENIOLA'S ADDITION: Holds the audit logs
   
+  // UI STATE
   const [activeTab, setActiveTab] = useState("overview");
   const navigate = useNavigate();
 
@@ -44,15 +56,17 @@ export default function AdminDashboard() {
   const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newDepartment, setNewDepartment] = useState("Water Services");
-  const [isProvisioning, setIsProvisioning] = useState(false);
+  const [isProvisioning, setIsProvisioning] = useState(false); 
 
-  // 1. AUTH & REAL-TIME DATA FETCHING
+  // ==========================================
+  // 4. LIFECYCLE & REAL-TIME DATA FETCHING
+  // ==========================================
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
         setUser(currentUser);
         
-        // Fetch Tickets
+        // FETCH 1: Tickets Collection
         const qTickets = query(collection(db, "tickets"));
         const unsubTickets = onSnapshot(qTickets, (snapshot) => {
           const fetchedTickets = [];
@@ -60,7 +74,7 @@ export default function AdminDashboard() {
           setTickets(fetchedTickets);
         });
 
-        // Fetch Users
+        // FETCH 2: Users Collection
         const qUsers = query(collection(db, "users"));
         const unsubUsers = onSnapshot(qUsers, (snapshot) => {
           const fetchedUsers = [];
@@ -68,7 +82,7 @@ export default function AdminDashboard() {
           setPlatformUsers(fetchedUsers);
         });
 
-        // --- NEW: Fetch Audit Logs (Ordered newest to oldest) ---
+        // FETCH 3: Audit Logs Collection (ENIOLA'S ADDITION)
         const qLogs = query(collection(db, "audit_logs"), orderBy("timestamp", "desc"));
         const unsubLogs = onSnapshot(qLogs, (snapshot) => {
           const fetchedLogs = [];
@@ -76,7 +90,6 @@ export default function AdminDashboard() {
           setAuditLogs(fetchedLogs);
         });
 
-        // Clean up all three listeners
         return () => { unsubTickets(); unsubUsers(); unsubLogs(); };
       } else {
         navigate("/login");
@@ -91,9 +104,11 @@ export default function AdminDashboard() {
     navigate("/");
   };
 
-  // 2. DISPATCHER PROVISIONING LOGIC
+  // ==========================================
+  // 5. DISPATCHER PROVISIONING LOGIC
+  // ==========================================
   const handleProvisionDispatcher = async (e) => {
-    e.preventDefault();
+    e.preventDefault(); 
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(newEmail)) {
@@ -129,13 +144,13 @@ export default function AdminDashboard() {
     }
   };
 
-  // 3. SUSPEND/REACTIVATE RESIDENT LOGIC
+  // ==========================================
+  // 6. USER SUSPENSION LOGIC
+  // ==========================================
   const toggleUserStatus = async (userId, currentStatus) => {
     const newStatus = currentStatus === "Suspended" ? "Active" : "Suspended";
     try {
-      await updateDoc(doc(db, "users", userId), {
-        status: newStatus
-      });
+      await updateDoc(doc(db, "users", userId), { status: newStatus });
     } catch (error) {
       console.error("Error updating user status:", error);
       alert("Failed to update user status.");
@@ -144,7 +159,9 @@ export default function AdminDashboard() {
 
   if (!user) return null;
 
-  // DYNAMIC COUNTERS & ANALYTICS
+  // ==========================================
+  // 7. DATA PROCESSING & ANALYTICS
+  // ==========================================
   const activeResidentsCount = platformUsers.filter(u => u.role === "Resident").length;
   const activeDispatchersCount = platformUsers.filter(u => u.role === "Dispatcher").length;
   
@@ -152,10 +169,15 @@ export default function AdminDashboard() {
   const electricityTickets = tickets.filter(t => t.category === "Electricity Services").length;
   const wasteTickets = tickets.filter(t => t.category === "Waste Management").length;
 
+  const requiresAttention = tickets.filter(t => t.status === "Escalated" || t.status === "Pending_Escalation");
+
+  // ==========================================
+  // 8. THE UI RENDER
+  // ==========================================
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col md:flex-row font-sans text-slate-900 relative">
       
-      {/* --- PROVISION MODAL --- */}
+      {/* --- FLOATING MODAL: PROVISION DISPATCHER --- */}
       {showModal && (
         <div className="absolute inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl">
@@ -188,7 +210,7 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* --- ADMIN SIDEBAR --- */}
+      {/* --- ADMIN SIDEBAR (DARK THEME) --- */}
       <aside className="w-full md:w-64 bg-slate-900 text-white flex flex-col">
         <div className="p-6 border-b border-slate-800 flex items-center gap-3">
           <ShieldCheck className="h-8 w-8 text-emerald-400" />
@@ -214,11 +236,13 @@ export default function AdminDashboard() {
         </div>
       </aside>
 
-      {/* --- MAIN CONTENT --- */}
+      {/* --- MAIN CONTENT AREA --- */}
       <main className="flex-1 p-6 lg:p-10 overflow-y-auto">
         <h2 className="text-3xl font-extrabold tracking-tight capitalize mb-10">{activeTab.replace("-", " ")}</h2>
 
-        {/* TAB 1: OVERVIEW */}
+        {/* ========================================== */}
+        {/* TAB 1: SYSTEM OVERVIEW                     */}
+        {/* ========================================== */}
         {activeTab === "overview" && (
           <div className="space-y-8">
             <div className="grid sm:grid-cols-3 gap-6">
@@ -254,15 +278,58 @@ export default function AdminDashboard() {
               </div>
             </div>
             
-            <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
-              <ShieldAlert className="h-12 w-12 text-slate-300 mb-4" />
-              <h3 className="text-lg font-bold">Ticket Moderation</h3>
-              <p className="text-slate-500 max-w-md mt-2">Escalated and disputed tickets will populate here for administrative review once the manual escalation module is active.</p>
+            {/* LIVE ESCALATED TICKETS LIST */}
+            <div className="mt-8">
+              <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                <ShieldAlert className="text-red-500"/> Requires Admin Attention
+              </h3>
+              
+              {requiresAttention.length === 0 ? (
+                <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center text-slate-500 flex flex-col items-center">
+                  <CheckCircle2 className="h-10 w-10 text-emerald-400 mb-2"/> 
+                  No tickets currently require admin intervention.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {requiresAttention.map(ticket => (
+                    <div key={ticket.id} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row justify-between sm:items-center gap-4 border-l-4 border-l-red-500">
+                      <div>
+                        <p className="font-bold text-slate-900">
+                          {ticket.category} 
+                          <span className="text-red-500 text-xs ml-2 font-bold uppercase tracking-wider bg-red-50 px-2 py-1 rounded-md">
+                            {ticket.status}
+                          </span>
+                        </p>
+                        <p className="text-sm text-slate-500 mt-1">{ticket.description}</p>
+                        <p className="text-xs text-slate-400 mt-2 font-medium">Resident: {ticket.residentEmail}</p>
+                      </div>
+                      <button 
+                        onClick={() => {
+                          let dispatcherEmail = "";
+                          if (ticket.category === "Water Services") dispatcherEmail = "madaraka.water.demo@gmail.com";
+                          else if (ticket.category === "Electricity Services") dispatcherEmail = "madaraka.power.demo@gmail.com";
+                          else dispatcherEmail = "madaraka.waste.demo@gmail.com";
+
+                          const subject = encodeURIComponent(`URGENT ESCALATION: Madaraka Connect Ticket ${ticket.id.slice(0,6)}`);
+                          const body = encodeURIComponent(`Hello,\n\nThis is an automated escalation from the Madaraka Connect System Administrator.\n\nA ticket has exceeded the maximum pending timeframe and requires immediate attention.\n\nTicket Details:\n- Category: ${ticket.category}\n- Issue: ${ticket.description}\n- Reported By: ${ticket.residentEmail}\n\nPlease log into the Dispatcher Portal to assign a technician immediately.\n\nRegards,\nSystem Admin`);
+
+                          window.location.href = `mailto:${dispatcherEmail}?subject=${subject}&body=${body}`;
+                        }}
+                        className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-800 transition-colors shrink-0"
+                      >
+                        Contact Dispatcher
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* TAB 2: USER MANAGEMENT */}
+        {/* ========================================== */}
+        {/* TAB 2: USER MANAGEMENT                     */}
+        {/* ========================================== */}
         {activeTab === "users" && (
           <div className="bg-white border rounded-2xl shadow-sm overflow-hidden">
             <div className="p-6 border-b flex justify-between items-center">
@@ -318,7 +385,9 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* --- REPLACED: TAB 3 AUDIT LOGS --- */}
+        {/* ========================================== */}
+        {/* TAB 3: AUDIT LOGS (ENIOLA'S IMPLEMENTATION)*/}
+        {/* ========================================== */}
         {activeTab === "audit" && (
           <div className="bg-white border rounded-2xl shadow-sm overflow-hidden">
             <div className="p-6 border-b">
