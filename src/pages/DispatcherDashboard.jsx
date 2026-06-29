@@ -1,46 +1,95 @@
+// ==========================================
+// 1. IMPORTS
+// ==========================================
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { auth, db } from "../firebase";
-import { signOut } from "firebase/auth";
-// --- NEW IMPORTS: Added addDoc and serverTimestamp to create background logs ---
-import { collection, query, orderBy, onSnapshot, doc, updateDoc, addDoc, serverTimestamp } from "firebase/firestore";
-import { Clock, CheckCircle, Truck, Loader2, LayoutDashboard, FileText, LogOut, User, Phone, MapPin } from "lucide-react";
+import { signOut, onAuthStateChanged } from "firebase/auth";
+import { collection, query, orderBy, onSnapshot, doc, updateDoc, addDoc, serverTimestamp, getDoc } from "firebase/firestore";
+import { Clock, CheckCircle, Truck, Loader2, LayoutDashboard, FileText, LogOut, User, Phone, MapPin, AlertTriangle } from "lucide-react";
 
 export default function DispatcherDashboard() {
+  // ==========================================
+  // 2. STATE MANAGEMENT
+  // ==========================================
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
+  const [dispatcherDept, setDispatcherDept] = useState(""); // NEW: Stores this specific dispatcher's department
 
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("active"); 
 
   const [assigningId, setAssigningId] = useState(null);
   const [techName, setTechName] = useState("");
   const [techContact, setTechContact] = useState("");
 
+  // ==========================================
+  // 3. LIFECYCLE & DATA FETCHING
+  // ==========================================
   useEffect(() => {
-    const q = query(collection(db, "tickets"), orderBy("createdAt", "desc"));
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const ticketsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setTickets(ticketsData);
-      setLoading(false);
-    }, (error) => {
-      console.error("Error fetching tickets: ", error);
-      setLoading(false);
+    // Wrap the entire fetch in the active auth listener for security
+    const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        
+        // --- NEW: FETCH DISPATCHER DEPARTMENT ---
+        // Before we fetch tickets, we need to know what department this dispatcher belongs to
+        try {
+          const userDoc = await getDoc(doc(db, "users", currentUser.uid));
+          if (userDoc.exists()) {
+            const dept = userDoc.data().department;
+            setDispatcherDept(dept); // e.g., "Water Services"
+
+            // Now fetch the tickets, ordered by date
+            const q = query(collection(db, "tickets"), orderBy("createdAt", "desc"));
+            
+            const unsubscribeTickets = onSnapshot(q, (snapshot) => {
+              let fetchedTickets = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+              }));
+
+              // --- BUG FIX: DEPARTMENT FILTERING ---
+              // Filter the tickets so this dispatcher ONLY sees their department's tickets
+              fetchedTickets = fetchedTickets.filter(ticket => ticket.category === dept);
+
+              // --- NEW: PRIORITY ESCALATION SORTING ---
+              // Force Escalated tickets to the absolute top of the list
+              fetchedTickets.sort((a, b) => {
+                if (a.status === "Escalated" && b.status !== "Escalated") return -1;
+                if (b.status === "Escalated" && a.status !== "Escalated") return 1;
+                return 0; // If neither is escalated, keep the default date order from Firebase
+              });
+
+              setTickets(fetchedTickets);
+              setLoading(false);
+            }, (error) => {
+              console.error("Error fetching tickets: ", error);
+              setLoading(false);
+            });
+
+            return () => unsubscribeTickets();
+          }
+        } catch (err) {
+          console.error("Error fetching user data:", err);
+          setLoading(false);
+        }
+
+      } else {
+        navigate("/login");
+      }
     });
 
-    return () => unsubscribe();
-  }, []);
+    return () => unsubscribeAuth();
+  }, [navigate]);
 
+  // ==========================================
+  // 4. ACTION HANDLERS
+  // ==========================================
   const handleStatusChange = async (ticketId, newStatus) => {
     try {
       const ticketRef = doc(db, "tickets", ticketId);
       await updateDoc(ticketRef, { status: newStatus });
 
-      // --- NEW: Record a receipt in the audit_logs collection ---
       await addDoc(collection(db, "audit_logs"), {
         ticketId: ticketId,
         action: "Status Update",
@@ -82,7 +131,6 @@ export default function DispatcherDashboard() {
         technicianContact: techContact.trim()
       });
       
-      // --- NEW: Record a receipt in the audit_logs collection ---
       await addDoc(collection(db, "audit_logs"), {
         ticketId: ticketId,
         action: "Technician Assignment",
@@ -109,6 +157,9 @@ export default function DispatcherDashboard() {
     }
   };
 
+  // ==========================================
+  // 5. UI HELPERS & DERIVED STATE
+  // ==========================================
   const getStatusColor = (status) => {
     switch(status) {
       case "Pending": return "bg-yellow-100 text-yellow-800 border-yellow-200";
@@ -116,22 +167,28 @@ export default function DispatcherDashboard() {
       case "Resolved": return "bg-emerald-100 text-emerald-800 border-emerald-200";
       case "Closed": return "bg-slate-200 text-slate-600 border-slate-300"; 
       case "Cancelled": return "bg-red-50 text-red-500 border-red-200"; 
+      case "Escalated": return "bg-red-100 text-red-800 border-red-300"; 
+      // --- NEW: Add the purple badge for Admin Reviewed ---
+      case "Admin_Reviewed": return "bg-purple-100 text-purple-800 border-purple-300";
       default: return "bg-slate-100 text-slate-800 border-slate-200";
     }
   };
 
   const totalReports = tickets.length;
-  const pendingReports = tickets.filter(t => t.status === "Pending").length;
-  const dispatchedReports = tickets.filter(t => t.status === "Dispatched").length;
+// Ensure Admin_Reviewed tickets still show up as "Pending Action"
+  const pendingReports = tickets.filter(t => t.status === "Pending" || t.status === "Escalated" || t.status === "Admin_Reviewed").length;  const dispatchedReports = tickets.filter(t => t.status === "Dispatched").length;
 
   const displayedTickets = activeTab === "active" 
     ? tickets.filter(t => t.status !== "Closed" && t.status !== "Cancelled") 
     : tickets;
 
+  // ==========================================
+  // 6. RENDER
+  // ==========================================
   return (
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
       
-      {/* SIDEBAR */}
+      {/* --- SIDEBAR --- */}
       <aside className="w-64 bg-white border-r border-slate-200 flex flex-col justify-between shrink-0 hidden md:flex">
         <div>
           <div className="p-6 md:p-8">
@@ -162,22 +219,22 @@ export default function DispatcherDashboard() {
 
         <div className="p-6 border-t border-slate-100 bg-slate-50/50">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Logged in as</p>
-          <p className="text-sm font-bold text-slate-900 truncate mb-4">
-            {auth.currentUser?.email || "dispatcher@madaraka.com"}
-          </p>
+          <p className="text-sm font-bold text-slate-900 truncate">{auth.currentUser?.email || "dispatcher@madaraka.com"}</p>
+          {/* Displaying their specific department */}
+          <p className="text-xs text-blue-600 font-bold mb-4">{dispatcherDept}</p> 
           <button onClick={handleLogout} className="flex items-center gap-2 text-red-600 font-semibold hover:text-red-700 transition-colors">
             <LogOut className="w-5 h-5" /> Log Out
           </button>
         </div>
       </aside>
 
-      {/* MAIN CONTENT */}
+      {/* --- MAIN CONTENT --- */}
       <main className="flex-1 overflow-y-auto p-6 md:p-10">
         <div className="max-w-6xl mx-auto space-y-8">
           
           <div>
             <h2 className="text-3xl font-extrabold tracking-tight">Dispatcher Dashboard</h2>
-            <p className="text-slate-500 mt-2">Manage, assign, and track incoming utility issues.</p>
+            <p className="text-slate-500 mt-2">Manage, assign, and track incoming utility issues for {dispatcherDept}.</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -186,7 +243,7 @@ export default function DispatcherDashboard() {
               <p className="text-4xl font-extrabold text-slate-900">{totalReports}</p>
             </div>
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-              <p className="text-sm font-semibold text-slate-500 mb-2">Pending</p>
+              <p className="text-sm font-semibold text-slate-500 mb-2">Pending Action</p>
               <p className="text-4xl font-extrabold text-amber-500">{pendingReports}</p>
             </div>
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
@@ -211,7 +268,7 @@ export default function DispatcherDashboard() {
                 <div className="text-center py-12">
                   <CheckCircle className="h-12 w-12 text-emerald-400 mx-auto mb-4" />
                   <p className="text-slate-500">
-                    {activeTab === "active" ? "There are no active utility issues." : "No records found in the database."}
+                    {activeTab === "active" ? `No active tickets for ${dispatcherDept}.` : `No records found for ${dispatcherDept}.`}
                   </p>
                 </div>
               ) : (
@@ -223,6 +280,7 @@ export default function DispatcherDashboard() {
                       ticket.status === "Resolved" || 
                       ticket.status === "Closed" || 
                       ticket.status === "Cancelled" || 
+                      ticket.status === "Admin_Reviewed" ||
                       ticket.technicianName;
 
                     const isAssignDisabled = 
@@ -237,8 +295,21 @@ export default function DispatcherDashboard() {
                       !ticket.technicianName;
 
                     return (
-                      <div key={ticket.id} className={`bg-slate-50 rounded-xl border flex flex-col overflow-hidden transition-all hover:shadow-md ${ticket.status === 'Cancelled' ? 'border-red-100 opacity-75' : 'border-slate-200 hover:border-blue-200'}`}>
+                      // --- NEW: Dynamic border for Escalated tickets ---
+                      <div key={ticket.id} className={`bg-slate-50 rounded-xl border flex flex-col overflow-hidden transition-all hover:shadow-md ${
+                        ticket.status === 'Cancelled' ? 'border-red-100 opacity-75' : 
+                        ticket.status === 'Escalated' ? 'border-2 border-red-500 shadow-red-500/20' : 
+                        'border-slate-200 hover:border-blue-200'
+                      }`}>
                         
+                        {/* --- NEW: ESCALATION UI BANNER --- */}
+                        {ticket.status === "Escalated" && (
+                          <div className="bg-red-600 text-white text-xs font-bold uppercase tracking-wider px-5 py-2.5 flex items-center justify-between">
+                            <span className="flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> Priority Escalation</span>
+                            <span>Admin Notified</span>
+                          </div>
+                        )}
+
                         <div className="p-5 border-b border-slate-200 bg-white">
                           <div className="flex justify-between items-start mb-2">
                             <span className="font-bold text-slate-900">{ticket.category}</span>
@@ -299,7 +370,7 @@ export default function DispatcherDashboard() {
                                 />
                                 <input 
                                   type="text" 
-                                  placeholder="07XXXXXXXX or +254XXXXXXXXX" 
+                                  placeholder="07XXXXXXXX" 
                                   value={techContact}
                                   onChange={(e) => setTechContact(e.target.value)}
                                   className="flex-1 px-3 py-2 text-xs border border-slate-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
@@ -347,7 +418,7 @@ export default function DispatcherDashboard() {
                                     : "border-blue-200 hover:bg-blue-50 text-blue-700"}`}
                               >
                                 <Truck className="w-3 h-3" /> 
-                                {ticket.technicianName ? "Reassign Tech" : "Assign & Dispatch"}
+                                {ticket.technicianName ? "Reassign" : "Assign"}
                               </button>
                               
                               <button 

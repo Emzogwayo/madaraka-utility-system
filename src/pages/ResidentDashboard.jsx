@@ -136,6 +136,7 @@ export default function ResidentDashboard() {
     if (status === "Closed") return "bg-slate-200 text-slate-700 border border-slate-300";
     if (status === "Escalated") return "bg-red-100 text-red-700 border border-red-200";
     if (status === "Cancelled") return "bg-red-50 text-red-500 border border-red-100"; // Eniola's Addition
+    if (status === "Admin_Reviewed") return "bg-purple-100 text-purple-700 border border-purple-200";
     return "bg-slate-100 text-slate-700";
   };
 

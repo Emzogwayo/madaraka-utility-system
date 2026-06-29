@@ -104,6 +104,33 @@ export default function AdminDashboard() {
     navigate("/");
   };
 
+  // --- NEW: IN-HOUSE ESCALATION HANDLING ---
+  const handleAcknowledgeEscalation = async (ticketId) => {
+    try {
+      const ticketRef = doc(db, "tickets", ticketId);
+      
+      // Update the ticket to show the Admin has seen it
+      await updateDoc(ticketRef, { 
+        status: "Admin_Reviewed",
+        adminReviewedAt: new Date()
+      });
+
+      // Log it in Eniola's audit system
+      await setDoc(doc(db, "audit_logs", `${ticketId}_admin_review`), {
+        ticketId: ticketId,
+        action: "Admin Review",
+        details: "Administrator acknowledged the escalation.",
+        performedBy: auth.currentUser?.email || "System Admin",
+        timestamp: new Date()
+      });
+
+      alert("Escalation acknowledged! The Dispatcher's dashboard has been updated.");
+    } catch (error) {
+      console.error("Error acknowledging escalation: ", error);
+      alert("Failed to acknowledge escalation.");
+    }
+  };
+
   // ==========================================
   // 5. DISPATCHER PROVISIONING LOGIC
   // ==========================================
@@ -303,21 +330,12 @@ export default function AdminDashboard() {
                         <p className="text-sm text-slate-500 mt-1">{ticket.description}</p>
                         <p className="text-xs text-slate-400 mt-2 font-medium">Resident: {ticket.residentEmail}</p>
                       </div>
+                      {/* --- REPLACED: In-House Ping Button --- */}
                       <button 
-                        onClick={() => {
-                          let dispatcherEmail = "";
-                          if (ticket.category === "Water Services") dispatcherEmail = "madaraka.water.demo@gmail.com";
-                          else if (ticket.category === "Electricity Services") dispatcherEmail = "madaraka.power.demo@gmail.com";
-                          else dispatcherEmail = "madaraka.waste.demo@gmail.com";
-
-                          const subject = encodeURIComponent(`URGENT ESCALATION: Madaraka Connect Ticket ${ticket.id.slice(0,6)}`);
-                          const body = encodeURIComponent(`Hello,\n\nThis is an automated escalation from the Madaraka Connect System Administrator.\n\nA ticket has exceeded the maximum pending timeframe and requires immediate attention.\n\nTicket Details:\n- Category: ${ticket.category}\n- Issue: ${ticket.description}\n- Reported By: ${ticket.residentEmail}\n\nPlease log into the Dispatcher Portal to assign a technician immediately.\n\nRegards,\nSystem Admin`);
-
-                          window.location.href = `mailto:${dispatcherEmail}?subject=${subject}&body=${body}`;
-                        }}
-                        className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-800 transition-colors shrink-0"
+                        onClick={() => handleAcknowledgeEscalation(ticket.id)}
+                        className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-800 transition-colors shrink-0 flex items-center gap-2"
                       >
-                        Contact Dispatcher
+                        <CheckCircle2 className="w-4 h-4" /> Acknowledge & Ping
                       </button>
                     </div>
                   ))}
