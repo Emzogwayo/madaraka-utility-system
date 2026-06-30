@@ -20,6 +20,11 @@ import {
   ShieldCheck, UserPlus, X, Droplet, Zap, Trash2, Ban, CheckCircle2
 } from "lucide-react";
 
+// NOTIFICATIONS: Importing a notification bell component and toast notifications
+import toast from 'react-hot-toast';
+import NotificationBell from '../components/NotificationBell'; // Adjust path if needed
+import { addDoc, serverTimestamp } from 'firebase/firestore'; // Make sure addDoc and serverTimestamp are imported
+
 // ==========================================
 // 2. FIREBASE CONFIGURATION
 // ==========================================
@@ -124,10 +129,20 @@ export default function AdminDashboard() {
         timestamp: new Date()
       });
 
-      alert("Escalation acknowledged! The Dispatcher's dashboard has been updated.");
+      // Notify the dispatcher responsible for this ticket's category
+      toast.success("Escalation acknowledged! Dispatcher notified.");
+      // Send notification to the specific dispatcher
+      await addDoc(collection(db, "notifications"), {
+        recipientId: `dispatcher_${ticket.category}`, // e.g. "dispatcher_Water Services"
+        title: "Admin Ping: Urgent Ticket",
+        message: `Admin has reviewed an escalated ticket for ${ticket.category}. Please resolve immediately.`,
+        read: false,
+        createdAt: serverTimestamp()
+      });
+
     } catch (error) {
       console.error("Error acknowledging escalation: ", error);
-      alert("Failed to acknowledge escalation.");
+      toast.error("Failed to acknowledge escalation.");
     }
   };
 
@@ -139,7 +154,7 @@ export default function AdminDashboard() {
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(newEmail)) {
-      alert("Validation Error: Please enter a valid email address (e.g., tech@kplc.co.ke)");
+      toast.error("Validation Error: Please enter a valid email address (e.g., tech@kplc.co.ke)");
       return; 
     }
 
@@ -161,11 +176,11 @@ export default function AdminDashboard() {
       setShowModal(false);
       setNewEmail("");
       setNewPassword("");
-      alert("Dispatcher successfully provisioned!");
+      toast.success("Dispatcher successfully provisioned!");
 
     } catch (error) {
       console.error("Provisioning Error:", error);
-      alert("Error: " + error.message);
+      toast.error("Error: " + error.message);
     } finally {
       setIsProvisioning(false);
     }
@@ -180,7 +195,7 @@ export default function AdminDashboard() {
       await updateDoc(doc(db, "users", userId), { status: newStatus });
     } catch (error) {
       console.error("Error updating user status:", error);
-      alert("Failed to update user status.");
+      toast.error("Failed to update user status.");
     }
   };
 
@@ -265,8 +280,16 @@ export default function AdminDashboard() {
 
       {/* --- MAIN CONTENT AREA --- */}
       <main className="flex-1 p-6 lg:p-10 overflow-y-auto">
-        <h2 className="text-3xl font-extrabold tracking-tight capitalize mb-10">{activeTab.replace("-", " ")}</h2>
-
+        {/* NEW: TOP NAVIGATION BAR */}
+        <header className="sticky top-0 z-40 bg-white border-b border-slate-200 px-6 lg:px-10 py-4 flex items-center justify-between shadow-sm">
+          <h2 className="text-2xl font-extrabold tracking-tight capitalize text-slate-900">
+            {activeTab.replace("-", " ")}
+          </h2>
+          <div className="flex items-center gap-4">
+            <span className="text-sm font-medium text-slate-500 hidden sm:block">Admin Alerts</span>
+            <NotificationBell recipientId="admin" />
+          </div>
+        </header>
         {/* ========================================== */}
         {/* TAB 1: SYSTEM OVERVIEW                     */}
         {/* ========================================== */}

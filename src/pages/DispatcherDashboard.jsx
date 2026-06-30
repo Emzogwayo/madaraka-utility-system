@@ -7,6 +7,8 @@ import { auth, db } from "../firebase";
 import { signOut, onAuthStateChanged } from "firebase/auth";
 import { collection, query, orderBy, onSnapshot, doc, updateDoc, addDoc, serverTimestamp, getDoc } from "firebase/firestore";
 import { Clock, CheckCircle, Truck, Loader2, LayoutDashboard, FileText, LogOut, User, Phone, MapPin, AlertTriangle } from "lucide-react";
+import toast from 'react-hot-toast';
+import NotificationBell from '../components/NotificationBell';
 
 export default function DispatcherDashboard() {
   // ==========================================
@@ -85,22 +87,35 @@ export default function DispatcherDashboard() {
   // ==========================================
   // 4. ACTION HANDLERS
   // ==========================================
-  const handleStatusChange = async (ticketId, newStatus) => {
+  const handleStatusChange = async (ticket, newStatus) => {
     try {
-      const ticketRef = doc(db, "tickets", ticketId);
+      const ticketRef = doc(db, "tickets", ticket.id);
       await updateDoc(ticketRef, { status: newStatus });
 
       await addDoc(collection(db, "audit_logs"), {
-        ticketId: ticketId,
+        ticketId: ticket.id,
         action: "Status Update",
         details: `Changed status to ${newStatus}`,
         performedBy: auth.currentUser?.email || "Unknown Dispatcher",
         timestamp: serverTimestamp()
       });
+      toast.success(`Status updated to ${newStatus}`);
+
+      // --- RESIDENT NOTIFICATION ---
+      // If the ticket is resolved, ping the resident to verify it!
+      if (newStatus === "Resolved" && ticket.residentId) {
+        await addDoc(collection(db, "notifications"), {
+          recipientId: ticket.residentId,
+          title: "Issue Resolved",
+          message: `Your ${ticket.category} ticket has been marked as resolved. Please confirm in your dashboard.`,
+          read: false,
+          createdAt: serverTimestamp()
+        });
+      }
 
     } catch (error) {
       console.error("Error updating status: ", error);
-      alert("Failed to update ticket status.");
+      toast.error("Failed to update status. Please try again.");
     }
   };
 
@@ -110,21 +125,21 @@ export default function DispatcherDashboard() {
     setTechContact(ticket.technicianContact || "");
   };
 
-  const handleAssignTechnician = async (ticketId) => {
+  const handleAssignTechnician = async (ticket) => {
     const nameParts = techName.trim().split(/\s+/);
     if (nameParts.length < 2) {
-      alert("Validation Error: Please provide both the First and Last name of the technician.");
+      toast.error("Validation Error: Please provide both the First and Last name of the technician.");
       return;
     }
 
     const phoneRegex = /^(\+254|0)\d{9}$/;
     if (!phoneRegex.test(techContact.trim())) {
-      alert("Validation Error: Phone number must be in a valid Kenyan format (e.g., 07XXXXXXXX or +254XXXXXXXXX).");
+      toast.error("Validation Error: Phone number must be in a valid Kenyan format (e.g., 07XXXXXXXX).");
       return;
     }
 
     try {
-      const ticketRef = doc(db, "tickets", ticketId);
+      const ticketRef = doc(db, "tickets", ticket.id);
       await updateDoc(ticketRef, { 
         status: "Dispatched",
         technicianName: techName.trim(),
@@ -132,22 +147,34 @@ export default function DispatcherDashboard() {
       });
       
       await addDoc(collection(db, "audit_logs"), {
-        ticketId: ticketId,
+        ticketId: ticket.id,
         action: "Technician Assignment",
         details: `Assigned technician ${techName.trim()} (${techContact.trim()})`,
         performedBy: auth.currentUser?.email || "Unknown Dispatcher",
         timestamp: serverTimestamp()
       });
+
+      // --- RESIDENT NOTIFICATION ---
+      if (ticket.residentId) {
+        await addDoc(collection(db, "notifications"), {
+          recipientId: ticket.residentId,
+          title: "Technician Dispatched",
+          message: `${techName.trim()} has been assigned to your ${ticket.category} issue.`,
+          read: false,
+          createdAt: serverTimestamp()
+        });
+      }
       
       setAssigningId(null);
       setTechName("");
       setTechContact("");
+      toast.success("Technician dispatched successfully!");
     } catch (error) {
       console.error("Error assigning technician: ", error);
-      alert("Failed to assign technician.");
+      toast.error("Failed to assign technician.");
     }
   };
-
+  
   const handleLogout = async () => {
     try {
       await signOut(auth);
@@ -204,7 +231,7 @@ export default function DispatcherDashboard() {
                 activeTab === "active" ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
               }`}
             >
-              <LayoutDashboard className="w-5 h-5" /> Dispatch Center
+              <LayoutDashboard className="w-5 h-5" /> Dashboard
             </button>
             <button 
               onClick={() => setActiveTab("all")}
@@ -221,7 +248,7 @@ export default function DispatcherDashboard() {
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Logged in as</p>
           <p className="text-sm font-bold text-slate-900 truncate">{auth.currentUser?.email || "dispatcher@madaraka.com"}</p>
           {/* Displaying their specific department */}
-          <p className="text-xs text-blue-600 font-bold mb-4">{dispatcherDept}</p> 
+          <p className="text-xs text-blue-600 font-bold mb-4">{dispatcherDept}</p>
           <button onClick={handleLogout} className="flex items-center gap-2 text-red-600 font-semibold hover:text-red-700 transition-colors">
             <LogOut className="w-5 h-5" /> Log Out
           </button>
@@ -230,13 +257,17 @@ export default function DispatcherDashboard() {
 
       {/* --- MAIN CONTENT --- */}
       <main className="flex-1 overflow-y-auto p-6 md:p-10">
-        <div className="max-w-6xl mx-auto space-y-8">
-          
-          <div>
-            <h2 className="text-3xl font-extrabold tracking-tight">Dispatcher Dashboard</h2>
-            <p className="text-slate-500 mt-2">Manage, assign, and track incoming utility issues for {dispatcherDept}.</p>
+        {/* NEW: TOP NAVIGATION BAR */}
+        <header className="sticky top-0 z-40 bg-white border-b border-slate-200 px-6 md:px-10 py-4 flex items-center justify-between shadow-sm">
+          <h2 className="text-2xl font-extrabold tracking-tight text-slate-900">
+            {activeTab === "active" ? "Dispatcher Dashboard" : "All Records"}
+          </h2>
+          <div className="flex items-center gap-4">
+            <span className="text-sm font-medium text-slate-500 hidden sm:block">Dept Alerts</span>
+            <NotificationBell recipientId={`dispatcher_${dispatcherDept}`} />
           </div>
-
+        </header>
+        <div className="max-w-6xl mx-auto space-y-8">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
               <p className="text-sm font-semibold text-slate-500 mb-2">Total Reports</p>
@@ -377,8 +408,7 @@ export default function DispatcherDashboard() {
                                 />
                               </div>
                               <div className="flex gap-2">
-                                <button 
-                                  onClick={() => handleAssignTechnician(ticket.id)}
+                                <button onClick={() => handleAssignTechnician(ticket)} 
                                   className="flex-1 py-2 bg-blue-600 text-white rounded-md text-xs font-semibold hover:bg-blue-700 transition-colors"
                                 >
                                   Confirm
@@ -421,8 +451,7 @@ export default function DispatcherDashboard() {
                                 {ticket.technicianName ? "Reassign" : "Assign"}
                               </button>
                               
-                              <button 
-                                onClick={() => handleStatusChange(ticket.id, "Resolved")}
+                              <button onClick={() => handleStatusChange(ticket, "Resolved")} 
                                 disabled={isResolveDisabled}
                                 className={`flex-1 py-2 border rounded-lg text-xs font-semibold transition-colors flex justify-center items-center gap-1 
                                   ${isResolveDisabled 

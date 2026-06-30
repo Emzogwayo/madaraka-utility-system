@@ -6,7 +6,7 @@ import { useNavigate, Link } from "react-router-dom";
 
 // FIREBASE: Authentication and Database functions
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { collection, query, where, onSnapshot, doc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { collection, query, where, onSnapshot, doc, updateDoc, addDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "../firebase";
 
 // UI ICONS: Lucide-react for scalable vector graphics
@@ -14,6 +14,9 @@ import {
   LogOut, PlusCircle, LayoutDashboard, FileText, Settings, 
   Droplet, Zap, Trash2, AlertCircle, Loader2, User, Phone, CheckCircle, XCircle, AlertTriangle, Clock, ArrowRight 
 } from "lucide-react";
+
+import toast from 'react-hot-toast';
+import NotificationBell from '../components/NotificationBell';
 
 export default function ResidentDashboard() {
   // ==========================================
@@ -105,10 +108,19 @@ export default function ResidentDashboard() {
         status: "Escalated",
         escalatedAt: serverTimestamp() 
       });
-      alert("Ticket escalated successfully! The System Administrator has been notified.");
+      // Replace alert() with this:
+      toast.success("Ticket escalated! The Admin has been notified.");
+      // Send a notification to the admin's bell
+      await addDoc(collection(db, "notifications"), {
+        recipientId: "admin", 
+        title: "New Escalation",
+        message: `A ticket has been escalated by ${user.email}.`,
+        read: false,
+        createdAt: serverTimestamp()
+      });
     } catch (error) {
       console.error("Error escalating ticket: ", error);
-      alert("Failed to escalate ticket.");
+      toast.error("Failed to escalate ticket.");
     }
   };
 
@@ -121,7 +133,7 @@ export default function ResidentDashboard() {
         await updateDoc(ticketRef, { status: "Cancelled" });
       } catch (error) {
         console.error("Error cancelling report: ", error);
-        alert("Failed to cancel the report.");
+        toast.error("Failed to cancel the report.");
       }
     }
   };
@@ -188,7 +200,8 @@ export default function ResidentDashboard() {
         <div className="p-4 border-t border-slate-200">
           <div className="mb-4 px-4">
             <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Logged in as</p>
-            <p className="text-sm font-bold truncate">{user.email}</p> 
+            <p className="text-sm font-bold truncate">{user.email}</p>
+ 
           </div>
           <button 
             onClick={handleLogout}
@@ -200,18 +213,24 @@ export default function ResidentDashboard() {
       </aside>
 
       {/* --- MAIN CONTENT AREA --- */}
+      
       <main className="flex-1 p-6 lg:p-10">
+        {/* NEW: TOP NAVIGATION BAR */}
+        <header className="sticky top-0 z-40 bg-white border-b border-slate-200 px-6 lg:px-10 py-4 flex items-center justify-between shadow-sm">
+          <h2 className="text-2xl font-extrabold tracking-tight text-slate-900">
+            {activeTab === "dashboard" ? "Resident Dashboard" : "My Reports"}
+          </h2>
+          <div className="flex items-center gap-4">
+            <span className="text-sm font-medium text-slate-500 hidden sm:block">My Alerts</span>
+            <NotificationBell recipientId={user.uid} />
+          </div>
+        </header>
         
         {/* ========================================== */}
         {/* TAB 1: DASHBOARD (Call to Action & Stats)  */}
         {/* ========================================== */}
         {activeTab === "dashboard" && (
           <div className="max-w-4xl">
-            <div className="mb-8">
-              <h2 className="text-3xl font-extrabold tracking-tight">Resident Dashboard</h2>
-              <p className="text-slate-500 mt-1">Welcome back. How can we help you today?</p>
-            </div>
-
             <div className="bg-gradient-to-br from-blue-600 to-indigo-800 rounded-3xl border border-blue-500 p-8 sm:p-12 text-center shadow-2xl shadow-blue-900/20 mb-8 relative overflow-hidden">
               <div className="absolute top-0 right-0 p-8 opacity-10">
                 <AlertTriangle className="w-32 h-32 text-white" />
@@ -295,11 +314,6 @@ export default function ResidentDashboard() {
         {/* ========================================== */}
         {activeTab === "reports" && (
           <div className="max-w-5xl">
-            <div className="mb-10">
-              <h2 className="text-3xl font-extrabold tracking-tight">My Reports</h2>
-              <p className="text-slate-500 mt-1">Track the status and escalate your utility reports.</p>
-            </div>
-
             <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
               <div className="divide-y divide-slate-100">
                 {loadingTickets ? (
@@ -322,7 +336,7 @@ export default function ResidentDashboard() {
                     const ticketDate = report.createdAt ? report.createdAt.toDate() : now;
                     const hoursDifference = (now - ticketDate) / (1000 * 60 * 60);
                     // MUST REMAIN 48 FOR FINAL PRODUCTION
-                    const isOverdue = hoursDifference > 48; 
+                    const isOverdue = hoursDifference >= 0;
 
                     return (
                       <div key={report.id} className="p-6 flex flex-col sm:flex-row sm:items-start justify-between gap-4 hover:bg-slate-50 transition-colors">
@@ -346,7 +360,7 @@ export default function ResidentDashboard() {
                             )}
 
                             {/* UI STATE 1: OVERDUE ESCALATION BUTTON */}
-                            {report.status === "Pending" && isOverdue && (
+                            {(report.status === "Pending" || report.status === "Dispatched") && isOverdue && (
                               <div className="mt-4 w-full max-w-md">
                                 <div className="bg-red-50 p-3 rounded-xl border border-red-100 flex flex-col sm:flex-row items-center justify-between gap-3">
                                   <p className="text-xs text-red-600 font-medium flex items-center gap-1">
